@@ -7,17 +7,17 @@
 - Clone the repo. 
 `git clone https://github.com/T-Ivaniuk/Yelp-crawler-test-task.git`
 
-- Open Cloned Folder
+- Open сloned folder
 `cd Yelp-crawler-test-task`
 
-- Create VirtualEnv
+- Create virtualenv
 `python -m venv venv`
 
 - Activate virtualenv
 `.\venv\Scripts\activate`
 
-- Install Requirements
+- Install requirements
 `pip install -r requirements.txt`
 
-- Start Yelp crawler By
+- Start Yelp crawler by
 `python Yelp synchronous scraper.py`
