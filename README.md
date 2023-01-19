@@ -22,4 +22,4 @@
 - Add proxys
 
 - Start Yelp crawler by
-`python asynchronous yelp.com scraper.py`
+`python "asynchronous yelp.com scraper.py"`
