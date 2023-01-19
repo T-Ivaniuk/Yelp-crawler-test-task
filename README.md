@@ -19,5 +19,7 @@
 - Install requirements
 `pip install -r requirements.txt`
 
+- Add proxys
+
 - Start Yelp crawler by
-`python Yelp synchronous scraper.py`
+`python asynchronous yelp.com scraper.py`
