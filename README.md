@@ -19,7 +19,7 @@
 - Install requirements
 `pip install -r requirements.txt`
 
-- add a proxy by filling in the proxies.txt file to bypass blocking due to an excessive number of requests
+- add a proxy by filling in the `proxies.txt` file to bypass blocking due to an excessive number of requests
 
 - Start Yelp crawler by
 `python "asynchronous yelp.com scraper.py"`
