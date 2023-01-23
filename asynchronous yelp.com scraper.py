@@ -6,11 +6,14 @@ from bs4 import BeautifulSoup
 import random
 import json
 import asyncio
+import time
 
-headers = {
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36',
-    'authority': 'www.yelp.com'
-}
+retries = 3
+headers = \
+    {
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36',
+        'authority': 'www.yelp.com'
+    }
 
 
 def get_proxys():
@@ -43,6 +46,10 @@ def extract_url_from_redirection(redir_url):
     return urlparse(query).netloc
 
 
+def convert_business_url(url):
+    return url if "://" in url else "http://" + url
+
+
 def save_and_return_file(filename, data):
     with open(filename, 'w', encoding='utf-8') as outfile:
         json.dump(data, outfile, indent=4, ensure_ascii=False)
@@ -50,11 +57,17 @@ def save_and_return_file(filename, data):
     return outfile
 
 
+def transform_incoming_value(pages):
+    if pages == 'all':
+        return 100
+    return pages
+
+
 class Category:
     def __init__(self, category: str, location: str, pages=10, proxy=None):
         self._category = category
         self._location = location
-        self._pages = pages
+        self._pages = transform_incoming_value(pages)
         self._proxy = proxy
         self._retries = 3
         self._page_multiplier = 10
@@ -75,41 +88,46 @@ class Category:
     def parse_page(self, page):
         page_url = f"https://www.yelp.com/search/snippet?find_desc={self._category}&find_loc={self._location}&start={page}"
         for attempt in range(self._retries + 1):
-            proxy = {'socks5': random.choice(self._proxy)}
-            req = requests.get(url=page_url, headers=headers, proxies=proxy)
-            return req.json()
+            try:
+                proxy = {'socks5': random.choice(self._proxy)}
+                req = requests.get(url=page_url, headers=headers, proxies=proxy)
+                return req.json()
+            except requests.exceptions.RequestException as exc:
+                print("parse_page exc:", exc)
+            if attempt < self._retries:
+                sleepTime = 1.0 * 2 ** attempt  # sleep 1 second after first attempt, 2 after second, 4 after third, etc.
+                time.sleep(sleepTime)
 
 
 async def get_profile_json(biz_id):
-    try:
-        async with aiohttp.ClientSession() as session:
-            url = f'https://www.yelp.com/biz/{biz_id}/props'
-            response = await session.get(url=url, headers=headers, proxy=random.choice(get_proxys()))
-            return await response.json()
-    except ValueError:
-        asyncio.get_event_loop().close()
-        raise Exception('Website response: request denied')
-    except Exception as E:
-        print("get_profile_json ERROR!", E)
-        return None
-
-
-def convert_business_url(url):
-    return url if "://" in url else "http://" + url
+    for attempt in range(retries + 1):
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f'https://www.yelp.com/biz/{biz_id}/props'
+                response = await session.get(url=url, headers=headers, proxy=random.choice(get_proxys()))
+                return await response.json()
+        except ValueError:
+            print('Website response: request denied')
+        if attempt < retries:
+            sleepTime = 1.0 * 2 ** attempt  # exponential backoff: sleep 1 second after first attempt, 2 after second, 4 after third, etc.
+            await asyncio.sleep(sleepTime)
 
 
 async def parse_url_from_html(yelp_url):
-    try:
-        async with aiohttp.ClientSession() as session:
-            response = await session.get(url=yelp_url, headers=headers, proxy=random.choice(get_proxys()))
-            soup = BeautifulSoup(await response.text(), 'lxml')
-            redirection_url = soup.find('p', text='Business website').next_sibling.a['href']
-            return extract_url_from_redirection(redirection_url)
-    except AttributeError:
-        return None
-    except ValueError:
-        print('Website response: request denied')
-        return None
+    for attempt in range(retries + 1):
+        try:
+            async with aiohttp.ClientSession() as session:
+                response = await session.get(url=yelp_url, headers=headers, proxy=random.choice(get_proxys()))
+                soup = BeautifulSoup(await response.text(), 'lxml')
+                redirection_url = soup.find('p', text='Business website').next_sibling.a['href']
+                return extract_url_from_redirection(redirection_url)
+        except AttributeError:
+            return None
+        except ValueError:
+            print('Website response: request denied')
+        if attempt < retries:
+            sleepTime = 1.0 * 2 ** attempt  # exponential backoff: sleep 1 second after first attempt, 2 after second, 4 after third, etc.
+            await asyncio.sleep(sleepTime)
 
 
 async def get_business_page(business_obj):
@@ -208,4 +226,5 @@ def main(category, location):
     return save_and_return_file(filename=filename, data=category_result)
 
 
-main(category=input('category: '), location=input('location: '))  #main('Mexican', 'Ohio, IL, United States')
+# main(category=input('category: '), location=input('location: '))  #main('Mexican', 'Ohio, IL, United States')
+main('Italian', 'San Francisco, CA')
