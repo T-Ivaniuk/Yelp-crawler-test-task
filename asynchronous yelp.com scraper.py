@@ -1,7 +1,7 @@
+import os
 from urllib.parse import urlparse, parse_qs
 import aiohttp
 import requests
-from aiohttp import ContentTypeError
 from bs4 import BeautifulSoup
 import random
 import json
@@ -64,36 +64,43 @@ def transform_incoming_value(pages):
 
 
 class Category:
-    def __init__(self, category: str, location: str, pages=10, proxy=None):
+    def __init__(self, category: str, location: str, pages: str or int = 10):
         self._category = category
         self._location = location
         self._pages = transform_incoming_value(pages)
-        self._proxy = proxy
+        self._proxy = get_proxys()
         self._retries = 3
         self._page_multiplier = 10
 
     def collect_business_for_all_pages_in_category(self):
         businesses_in_category = []
         for page in range(0, self._pages):
-            page_response = self.parse_page(page=page * self._page_multiplier)
-            businessses_in_page = page_response['searchPageProps']['mainContentComponentsListProps']
-            no_ads_businesses_in_page = [x for x in businessses_in_page if not post_ads_filter(x)]
+            attempt, page_response = self.parse_page(page=page * self._page_multiplier)
+            if 'mainContentComponentsListProps' not in page_response['searchPageProps']:
+                print(f'Found {len(businesses_in_category)} business from {page} page(s) in {self._category}')
+                break
+
+            businesses_in_page = page_response['searchPageProps']['mainContentComponentsListProps']
+            no_ads_businesses_in_page = [x for x in businesses_in_page if not post_ads_filter(x)]
             businesses_in_category.extend(no_ads_businesses_in_page)
-            print(f'Found {len(no_ads_businesses_in_page)} businesses in page:{page}, category: {self._category}')
+            print(f'Attempt: {attempt} | Found {len(no_ads_businesses_in_page)} businesses in page:{page}, category: {self._category}')
+
             if len(no_ads_businesses_in_page) < self._page_multiplier:
                 print(f'Found {len(businesses_in_category)} business from {page + 1} page(s) in {self._category}')
                 break
+
         return businesses_in_category
 
     def parse_page(self, page):
         page_url = f"https://www.yelp.com/search/snippet?find_desc={self._category}&find_loc={self._location}&start={page}"
         for attempt in range(self._retries + 1):
             try:
-                proxy = {'socks5': random.choice(self._proxy)}
-                req = requests.get(url=page_url, headers=headers, proxies=proxy)
-                return req.json()
-            except requests.exceptions.RequestException as exc:
-                print("parse_page exc:", exc)
+                proxy = {'https': random.choice(self._proxy),
+                         'http': random.choice(self._proxy)}
+                response = requests.get(url=page_url, headers=headers, proxies=proxy, timeout=10).json()
+                return attempt, response
+            except ValueError as exc:
+                print(f'Attempt: {attempt} | Website response: request denied. ERROR : {exc} ')
             if attempt < self._retries:
                 sleepTime = 1.0 * 2 ** attempt  # sleep 1 second after first attempt, 2 after second, 4 after third, etc.
                 time.sleep(sleepTime)
@@ -106,7 +113,7 @@ async def get_profile_json(biz_id):
                 url = f'https://www.yelp.com/biz/{biz_id}/props'
                 response = await session.get(url=url, headers=headers, proxy=random.choice(get_proxys()))
                 return await response.json()
-        except ValueError:
+        except (ValueError, aiohttp.ContentTypeError):
             print('Website response: request denied')
         if attempt < retries:
             sleepTime = 1.0 * 2 ** attempt  # exponential backoff: sleep 1 second after first attempt, 2 after second, 4 after third, etc.
@@ -208,23 +215,25 @@ async def scrape_business(business):
     return res
 
 
-async def create_business_scraping_task(business: list, chunk=20):
+async def create_business_scraping_task(business: list, chunk=25):
     result = []
     composite_list = [business[x:x + chunk] for x in range(0, len(business), chunk)]
     for each_chunk in composite_list:
         asyncio_tasks = [asyncio.create_task(scrape_business(x)) for x in each_chunk]
-        result.append(await asyncio.gather(*asyncio_tasks))
+        result.extend(await asyncio.gather(*asyncio_tasks))
     return result
 
 
-def main(category, location):
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    cat = Category(category='Mexican', location=location, proxy=get_proxys())
+def main(category, location, pages=10):
+    cat = Category(category='Mexican', location=location, pages=pages)
     category_business_data = cat.collect_business_for_all_pages_in_category()
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     category_result = asyncio.new_event_loop().run_until_complete(create_business_scraping_task(category_business_data))
-    filename = f'{category}.json'
-    return save_and_return_file(filename=filename, data=category_result)
+    filename = f'{category}, {location}.json'
+    path = os.path.join(os.getcwd(), 'created json files')
+    os.makedirs(path, exist_ok=True)
+    filepath = os.path.join(path, filename)
+    return save_and_return_file(filename=filepath, data=category_result)
 
 
-# main(category=input('category: '), location=input('location: '))  #main('Mexican', 'Ohio, IL, United States')
-main('Italian', 'San Francisco, CA')
+main(category=input('category: '), location=input('location: '), pages='all')  #main('Mexican', 'Ohio, IL, United States')
