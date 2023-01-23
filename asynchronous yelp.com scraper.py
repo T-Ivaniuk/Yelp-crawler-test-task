@@ -50,8 +50,12 @@ def convert_business_url(url):
     return url if "://" in url else "http://" + url
 
 
-def save_and_return_file(filename, data):
-    with open(filename, 'w', encoding='utf-8') as outfile:
+def save_and_return_file(category, location, data):
+    filename = f'{category}, {location}.json'
+    path = os.path.join(os.getcwd(), 'created json files')
+    os.makedirs(path, exist_ok=True)
+    filepath = os.path.join(path, filename)
+    with open(filepath, 'w', encoding='utf-8') as outfile:
         json.dump(data, outfile, indent=4, ensure_ascii=False)
         print(f'{filename} saved successfully')
     return outfile
@@ -149,6 +153,7 @@ async def get_business_page(business_obj):
 
 class Business:
     def __init__(self, search_data):
+        self.reviews_data = None
         self.business_url = None
         self.reviews_count = None
         self.profile_data = None
@@ -194,7 +199,7 @@ class Business:
             'Number of reviews': self.reviews_count,
             'Business yelp url': self.yelp_url,
             'Business website': self.business_url,
-            'Reviews': self.get_review_data()
+            'Reviews': self.reviews_data
         }
 
     def parse_url_from_json_obj(self):
@@ -208,8 +213,9 @@ class Business:
 async def scrape_business(business):
     business_obj = Business(search_data=business)
     business_obj.profile_data = await get_profile_json(biz_id=business_obj.bizId)
-    business_obj.reviews_count = business_obj.get_reviews_count()
     business_obj.business_url = await get_business_page(business_obj)
+    business_obj.reviews_count = business_obj.get_reviews_count()
+    business_obj.reviews_data = business_obj.get_review_data()
     res = business_obj.create_json()
     print(f'{business_obj.name} scraped', res)
     return res
@@ -225,15 +231,14 @@ async def create_business_scraping_task(business: list, chunk=25):
 
 
 def main(category, location, pages=10):
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
     cat = Category(category='Mexican', location=location, pages=pages)
     category_business_data = cat.collect_business_for_all_pages_in_category()
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
     category_result = asyncio.new_event_loop().run_until_complete(create_business_scraping_task(category_business_data))
-    filename = f'{category}, {location}.json'
-    path = os.path.join(os.getcwd(), 'created json files')
-    os.makedirs(path, exist_ok=True)
-    filepath = os.path.join(path, filename)
-    return save_and_return_file(filename=filepath, data=category_result)
+
+    return save_and_return_file(category=category, location=location, data=category_result)
 
 
 main(category=input('category: '), location=input('location: '), pages='all')  #main('Mexican', 'Ohio, IL, United States')
